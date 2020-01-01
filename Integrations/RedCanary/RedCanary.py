@@ -9,9 +9,9 @@ import requests
 requests.packages.urllib3.disable_warnings()
 
 ''' GLOBAL VARS '''
-BASE_URL = '{}/openapi/v3'.format(demisto.params()['domain'])
-API_KEY = demisto.params()['api_key']
-USE_SSL = not demisto.params().get('insecure', False)
+BASE_URL = ''
+API_KEY = ''
+USE_SSL = True
 
 ''' HELPER FUNCTIONS '''
 
@@ -305,7 +305,16 @@ def detections_to_entry(detections, show_timeline=False):
 
 
 def get_unacknowledge_detections(t, per_page=50):
-    ''' iterate over all unacknowledged detections later then time t'''
+    # type: (Union[str, int], int) -> dict
+    """ Iterate over all unacknowledged detections later then time t.
+
+    Params:
+        t: time or id of last fetched event
+        per_page: how many detections to fetch per page
+
+    Yields:
+        (dict): detection dict
+    """
     page = 1
     passed = False
     while not passed:
@@ -315,11 +324,17 @@ def get_unacknowledge_detections(t, per_page=50):
             passed = True
 
         for detection in res:
-            if get_time_obj(detection['attributes']['time_of_occurrence']) < t:
-                passed = True
-                break
-            if detection['attributes']['last_acknowledged_at'] is not None or detection['attributes'][
-                    'last_acknowledged_by'] is not None:
+            # int for detection id
+            if isinstance(t, int):
+                if int(detection['id']) < t:
+                    passed = True
+                    break
+            # str for timeformat
+            else:
+                if get_time_obj(detection['attributes']['time_of_occurrence']) < t:
+                    passed = True
+                    break
+            if detection['attributes']['last_acknowledged_at'] or detection['attributes']['last_acknowledged_by']:
                 continue
 
             yield detection
@@ -518,25 +533,27 @@ def execute_playbook(playbook_id, detection_id):
 
 def fetch_incidents():
     last_run = demisto.getLastRun()
-    last_fetch = last_run.get('time')
-
+    last_fetch = last_run.get('time') if last_run else None
     # handle first time fetch
-    if last_fetch is None:
+    if not (last_fetch):
         last_fetch = datetime.now() - timedelta(days=5)
-    else:
+    # handle time format
+    elif isinstance(last_fetch, str):
         last_fetch = datetime.strptime(last_fetch, '%Y-%m-%dT%H:%M:%SZ')
+    
 
     LOG('iterating on detections, looking for more recent than {}'.format(last_fetch))
     incidents = []
+    id_list = list()
     for raw_detection in get_unacknowledge_detections(last_fetch, per_page=2):
-        LOG('found detection #{}'.format(raw_detection['id']))
+        detection_id = int(raw_detection['id'])
+        LOG('found detection #{}'.format(detection_id))
         incident = detection_to_incident(raw_detection)
-
+        id_list.append(detection_id)
         incidents.append(incident)
 
-    if len(incidents) != 0:
-        last_fetch = max([get_time_obj(incident['occurred']) for incident in incidents])  # noqa:F812
-        demisto.setLastRun({'time': get_time_str(last_fetch + timedelta(seconds=1))})
+    if incidents:
+        demisto.setLastRun({'time': max(id_list)})
     demisto.incidents(incidents)
 
 
@@ -546,32 +563,39 @@ def test_integration():
     return 'ok'
 
 
-''' EXECUTION CODE '''
-COMMANDS = {
-    'test-module': test_integration,
-    'fetch-incidents': fetch_incidents,
-    'redcanary-list-detections': list_detections_command,
-    'redcanary-list-endpoints': list_endpoints_command,
-    'redcanary-get-endpoint': get_endpoint_command,
-    'redcanary-get-endpoint-detections': get_endpoint_detections_command,
-    'redcanary-get-detection': get_detection_command,
-    'redcanary-acknowledge-detection': acknowledge_detection_command,
-    'redcanary-update-remediation-state': remediate_detection_command,
-    'redcanary-execute-playbook': execute_playbook_command,
-}
+def main():
+    COMMANDS = {
+        'test-module': test_integration,
+        'fetch-incidents': fetch_incidents,
+        'redcanary-list-detections': list_detections_command,
+        'redcanary-list-endpoints': list_endpoints_command,
+        'redcanary-get-endpoint': get_endpoint_command,
+        'redcanary-get-endpoint-detections': get_endpoint_detections_command,
+        'redcanary-get-detection': get_detection_command,
+        'redcanary-acknowledge-detection': acknowledge_detection_command,
+        'redcanary-update-remediation-state': remediate_detection_command,
+        'redcanary-execute-playbook': execute_playbook_command,
+    }
 
-try:
-    handle_proxy()
-    LOG('command is %s' % (demisto.command(),))
-    command_func = COMMANDS.get(demisto.command())
-    if command_func is not None:
-        if demisto.command() == 'fetch-incidents':
-            demisto.incidents(command_func())
-        else:
-            demisto.results(command_func())
+    try:
+        handle_proxy()
+        LOG('command is %s' % (demisto.command(),))
+        command_func = COMMANDS.get(demisto.command())
+        if command_func is not None:
+            if demisto.command() == 'fetch-incidents':
+                demisto.incidents(command_func())
+            else:
+                demisto.results(command_func())
 
-except Exception as e:
-    LOG(e.message)
-    if demisto.command() != 'test-module':
-        LOG.print_log()
-    return_error('error has occurred: {}'.format(e.message, ))
+    except Exception as e:
+        LOG(e.message)
+        if demisto.command() != 'test-module':
+            LOG.print_log()
+        return_error('error has occurred: {}'.format(e.message))
+
+
+if __name__ in ("builtins", "__builtin__"):
+    BASE_URL = '{}/openapi/v3'.format(demisto.params()['domain'])
+    API_KEY = demisto.params()['api_key']
+    USE_SSL = not demisto.params().get('insecure', False)
+    main()
