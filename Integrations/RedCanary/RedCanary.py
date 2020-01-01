@@ -553,6 +553,7 @@ def fetch_incidents():
         incidents.append(incident)
 
     if incidents:
+        # Get highest ID.
         demisto.setLastRun({'time': max(id_list)})
     demisto.incidents(incidents)
 
