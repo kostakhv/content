@@ -4,6 +4,7 @@ from CommonServerUserPython import *
 
 ''' IMPORTS '''
 import requests
+from typing import Union, Iterable
 
 # disable insecure warnings
 requests.packages.urllib3.disable_warnings()
@@ -305,7 +306,7 @@ def detections_to_entry(detections, show_timeline=False):
 
 
 def get_unacknowledge_detections(t, per_page=50):
-    # type: (Union[str, int], int) -> dict
+    # type: (Union[str, int], int) -> Iterable[dict]
     """ Iterate over all unacknowledged detections later then time t.
 
     Params:
@@ -540,7 +541,6 @@ def fetch_incidents():
     # handle time format
     elif isinstance(last_fetch, str):
         last_fetch = datetime.strptime(last_fetch, '%Y-%m-%dT%H:%M:%SZ')
-    
 
     LOG('iterating on detections, looking for more recent than {}'.format(last_fetch))
     incidents = []
